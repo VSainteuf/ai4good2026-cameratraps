@@ -1,0 +1,36 @@
+[project]
+name = "iwildcam-dg"
+version = "0.1.0"
+description = "AI4GOOD 2026 — species classification from camera traps, evaluated on camera deployments the model has never seen"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+    "numpy>=1.26,<2.3",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "matplotlib>=3.9",
+    "pillow>=10.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+notebook = ["jupyterlab>=4.2", "ipykernel>=6.29"]
+dev = ["pytest>=8.0"]
+wandb = ["wandb>=0.17"]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.setuptools]
+packages = ["iwildcam"]

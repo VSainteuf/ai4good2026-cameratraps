@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Results from your runs — yours, not the repo's
+results/
+logs/
+
+# Image data and build intermediates live under data/; see data/.gitignore
+
+# Weights & Biases run directories (offline runs and cached artefacts)
+wandb/

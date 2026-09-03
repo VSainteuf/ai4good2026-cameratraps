@@ -1,0 +1,12 @@
+# Image folders land here after you run prepare.py — a few GB each, never committed.
+images_h*/
+images_unlabelled_h*/
+images_orig/
+images_*/
+
+# Instructor-side leftovers from how this repo was built.
+cache/
+*.blob
+*.parquet
+metadata_raw/
+extras/

@@ -47,12 +47,23 @@ Suggested directions to explore:
 ### 📦 Data
 
 1. Get the dataset from [Kaggle](https://www.kaggle.com/c/iwildcam-2020-fgvc7). You will need an account and you will have to accept the competition rules (that does not mean you take part in it).
+You can laucnh the download directly in CLI from the cluster machine using the kaggle package (you will be prompted to log in and generate an api token, simply follow the instructions).
+```bash
+uv tool install kaggle # install package
+kaggle competitions download -c iwildcam-2020-fgvc7 -p PATH/TO/DATA/iWildCam2020
+# Adapt the data path
+```
 2. Unzip it.
+```bash
+ unzip PATH/TO/DATA/iWildCam2020/iwildcam-2020-fgvc7.zip -d PATH/TO/DATA/
+ iWildCam2020
+ # Adapt the data path
+```
 3. Prepare it: `prepare.py` writes a copy of every image 448 pixels high, which is what
    makes training fast enough to iterate on. You can revisit this choice later.
 
 ```bash
-uv run python prepare.py --source ~/iWildCam2020 --height 448  # 18.0 GB + 5.7 unlabelled
+uv run python prepare.py --source PATH/TO/DATA/iWildCam2020 --height 448
 ```
 
 ### 🔍 Data exploration

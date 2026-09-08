@@ -182,7 +182,7 @@ def run_name(cfg: dict) -> str:
     return f"{_stem(cfg)}-seed{cfg['seed']}-{run_key(cfg)[:8]}"
 
 
-# --- progress bars ----------------------------------------------------------------------
+# --- what a run shows on screen -------------------------------------------------------
 
 # The real terminal, grabbed at import time -- before `tee_console` swaps `sys.stderr` for
 # a stream that also writes to the log file. Progress bars go here so their thousands of
@@ -209,6 +209,20 @@ def progress(iterable, desc: str | None, total: int | None = None) -> tqdm:
     return tqdm(iterable, desc=desc, total=total, file=CONSOLE, leave=False,
                 disable=desc is None or not CONSOLE.isatty(),
                 dynamic_ncols=True, mininterval=0.5, unit="batch")
+
+
+def fmt_secs(seconds: float) -> str:
+    """A short, readable duration: `48.3s` under a minute, `12m04s` above it.
+
+    Args:
+        seconds: the duration to format.
+
+    Returns:
+        A string like `48.3s` or `12m04s`.
+    """
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    return f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
 
 
 # --- always-on local logging ----------------------------------------------------------

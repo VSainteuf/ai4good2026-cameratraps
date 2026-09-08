@@ -35,9 +35,9 @@ from sklearn.metrics import accuracy_score, f1_score
 
 from .data import image_dir_for, load_fold, load_task, make_loaders
 from .models import build_model
-from .train_utils import (JSONL, PRED_DIR, RESULTS, config_key, find_result, group_name,
-                          load_config, per_camera_scores, progress, run_key, set_seed,
-                          tee_console, wandb_run)
+from .train_utils import (JSONL, PRED_DIR, RESULTS, config_key, find_result, fmt_secs,
+                          group_name, load_config, per_camera_scores, progress, run_key,
+                          set_seed, tee_console, wandb_run)
 
 # Mixed precision in bfloat16, which has the same exponent range as float32. That is what
 # lets the loop call `loss.backward()` directly: float16 gradients underflow to zero and
@@ -139,6 +139,7 @@ def run_fold(cfg: dict) -> dict:
     hist = []
     verbose = cfg.get("verbose", True)
     for epoch in range(1, cfg["epochs"] + 1):
+        epoch_started = time.time()
         model.train()
         total, seen = 0.0, 0
         bar = progress(loaders["train"],
@@ -159,7 +160,8 @@ def run_fold(cfg: dict) -> dict:
         val = evaluate(model, loaders["val"], device, task.n_classes, amp,
                        desc="val" if verbose else None)
         hist.append({"epoch": epoch, "loss": total / max(seen, 1),
-                     "val_macro_f1_present": val["macro_f1_present"]})
+                     "val_macro_f1_present": val["macro_f1_present"],
+                     "seconds": round(time.time() - epoch_started, 1)})
         log.log({**hist[-1], "lr": cfg["lr"],
                  "val_accuracy": val["accuracy"]}, step=epoch)
         if val["macro_f1_present"] > best["macro_f1_present"]:
@@ -167,7 +169,8 @@ def run_fold(cfg: dict) -> dict:
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         if verbose:
             print(f"  epoch {epoch:2d}  loss {hist[-1]['loss']:.3f}  "
-                  f"val macroF1(present) {val['macro_f1_present']:.3f}", flush=True)
+                  f"val macroF1(present) {val['macro_f1_present']:.3f}  "
+                  f"{fmt_secs(hist[-1]['seconds'])}", flush=True)
 
     # Restore the best-validation checkpoint before the held-out evaluation. 
     if best_state is not None:

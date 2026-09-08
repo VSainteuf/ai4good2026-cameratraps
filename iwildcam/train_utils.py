@@ -6,7 +6,7 @@ Four groups, in order:
   These decide what counts as the same run, so `run_one` can skip a repeat and W&B can
   average the seeds of one config.
 * **local logging** -- `tee_console`, always on: everything a run prints also lands in
-  `logs/<run_name>.log`.
+  `logs/<run_name>.log`. `progress` draws the in-epoch bars, on the terminal only.
 * **W&B logging** -- `wandb_run`, off unless you ask for it, with a do-nothing stand-in so
   the training loop needs no `if`.
 * **resume and config** -- `find_result` reads back a completed run, `load_config` merges
@@ -28,6 +28,7 @@ import numpy as np
 import torch
 import yaml
 from sklearn.metrics import accuracy_score, f1_score
+from tqdm.auto import tqdm
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results"
@@ -179,6 +180,35 @@ def run_name(cfg: dict) -> str:
         A name like `official_ood-resnet18-224-pre-e10-seed0-9f1c2ab3`.
     """
     return f"{_stem(cfg)}-seed{cfg['seed']}-{run_key(cfg)[:8]}"
+
+
+# --- progress bars ----------------------------------------------------------------------
+
+# The real terminal, grabbed at import time -- before `tee_console` swaps `sys.stderr` for
+# a stream that also writes to the log file. Progress bars go here so their thousands of
+# carriage-return redraws stay on screen and out of `logs/<run_name>.log`.
+CONSOLE = sys.stderr
+
+
+def progress(iterable, desc: str | None, total: int | None = None) -> tqdm:
+    """Wrap `iterable` in a progress bar, drawn on the terminal and nowhere else.
+
+    The bar draws nothing when `desc` is None or the terminal is not interactive (a
+    redirected run, `nohup`, a batch queue), where a redrawing bar is only noise. It is
+    still a `tqdm`, so `set_postfix_str` works either way and the caller needs no `if`.
+    The per-epoch summary line prints regardless, so a quiet bar loses nothing.
+
+    Args:
+        iterable: what to iterate over, e.g. a DataLoader.
+        desc: label shown at the left of the bar. None turns the bar off.
+        total: number of steps, if `len(iterable)` is not right.
+
+    Returns:
+        A `tqdm` around `iterable`, drawing or silent.
+    """
+    return tqdm(iterable, desc=desc, total=total, file=CONSOLE, leave=False,
+                disable=desc is None or not CONSOLE.isatty(),
+                dynamic_ncols=True, mininterval=0.5, unit="batch")
 
 
 # --- always-on local logging ----------------------------------------------------------

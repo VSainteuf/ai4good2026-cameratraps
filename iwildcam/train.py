@@ -36,8 +36,8 @@ from sklearn.metrics import accuracy_score, f1_score
 from .data import image_dir_for, load_fold, load_task, make_loaders
 from .models import build_model
 from .train_utils import (JSONL, PRED_DIR, RESULTS, config_key, find_result, group_name,
-                          load_config, per_camera_scores, run_key, set_seed, tee_console,
-                          wandb_run)
+                          load_config, per_camera_scores, progress, run_key, set_seed,
+                          tee_console, wandb_run)
 
 # Mixed precision in bfloat16, which has the same exponent range as float32. That is what
 # lets the loop call `loss.backward()` directly: float16 gradients underflow to zero and
@@ -49,7 +49,7 @@ AMP_DTYPE = torch.bfloat16
 
 @torch.no_grad()
 def evaluate(model: nn.Module, loader, device: str, n_classes: int,
-             amp: bool = True) -> dict:
+             amp: bool = True, desc: str | None = None) -> dict:
     """Run the model over `loader` and score its predictions.
 
     Args:
@@ -58,6 +58,7 @@ def evaluate(model: nn.Module, loader, device: str, n_classes: int,
         device: device to run on, e.g. `"cuda"`.
         n_classes: number of species, so absent classes still appear in the report.
         amp: use fp16 autocast.
+        desc: label for a progress bar over the batches. None means no bar.
 
     Returns:
         Dict with `accuracy`, `macro_f1`, `macro_f1_present`, and the `pred` and `true`
@@ -65,7 +66,7 @@ def evaluate(model: nn.Module, loader, device: str, n_classes: int,
     """
     model.eval()
     preds, trues = [], []
-    for xb, yb, _domain in loader:
+    for xb, yb, _domain in progress(loader, desc):
         xb = xb.to(device, non_blocking=True)
         with torch.autocast("cuda", dtype=AMP_DTYPE, enabled=amp):
             logits = model(xb)
@@ -136,10 +137,13 @@ def run_fold(cfg: dict) -> dict:
 
     best, best_state = {"macro_f1_present": -1.0}, None
     hist = []
+    verbose = cfg.get("verbose", True)
     for epoch in range(1, cfg["epochs"] + 1):
         model.train()
         total, seen = 0.0, 0
-        for xb, yb, domain in loaders["train"]:
+        bar = progress(loaders["train"],
+                       f"epoch {epoch}/{cfg['epochs']}" if verbose else None)
+        for xb, yb, domain in bar:
             xb = xb.to(device, non_blocking=True)
             yb = yb.to(device, non_blocking=True)
             with torch.autocast("cuda", dtype=AMP_DTYPE, enabled=amp):
@@ -149,8 +153,11 @@ def run_fold(cfg: dict) -> dict:
             opt.step()
             total += loss.item() * len(yb)
             seen += len(yb)
+            # refresh=False: the bar redraws on its own schedule, not once per batch.
+            bar.set_postfix_str(f"loss {total / seen:.3f}", refresh=False)
 
-        val = evaluate(model, loaders["val"], device, task.n_classes, amp)
+        val = evaluate(model, loaders["val"], device, task.n_classes, amp,
+                       desc="val" if verbose else None)
         hist.append({"epoch": epoch, "loss": total / max(seen, 1),
                      "val_macro_f1_present": val["macro_f1_present"]})
         log.log({**hist[-1], "lr": cfg["lr"],
@@ -158,14 +165,15 @@ def run_fold(cfg: dict) -> dict:
         if val["macro_f1_present"] > best["macro_f1_present"]:
             best = val
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-        if cfg.get("verbose", True):
+        if verbose:
             print(f"  epoch {epoch:2d}  loss {hist[-1]['loss']:.3f}  "
                   f"val macroF1(present) {val['macro_f1_present']:.3f}", flush=True)
 
     # Restore the best-validation checkpoint before the held-out evaluation. 
     if best_state is not None:
         model.load_state_dict(best_state)
-    test = evaluate(model, loaders["test"], device, task.n_classes, amp)
+    test = evaluate(model, loaders["test"], device, task.n_classes, amp,
+                    desc="test" if verbose else None)
 
     test_cam = task.camera[fold["test"]]
     per_cam = per_camera_scores(test["_pred"], test["_true"], test_cam)

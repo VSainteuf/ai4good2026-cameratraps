@@ -39,7 +39,9 @@ amp: true                      # bf16 autocast via torch.amp -- NOT optional in 
                                 # in this file just works
 num_workers: 8                 # DataLoader worker processes
 device: null                   # null -> cuda if available, else cpu
-verbose: true                  # print one line per epoch during training
+verbose: true                  # progress bar during each epoch, plus one summary line
+                               # per epoch. The bar draws only on a terminal, never into
+                               # the log file or a redirected run.
 pred_dir: results/preds        # where raw test predictions (.npz) are written
 log_dir: logs                  # every run also writes what it prints to
                                # logs/<split>-<model>-...-seed<n>-<run_key>.log.

@@ -79,6 +79,18 @@ Once the data is prepared:
 uv run python -m iwildcam.train --config configs/reference.yaml
 ```
 
+Each finished run appends one line to `results/runs.jsonl`. Once you have a few, flatten
+them into tables you can plot and compare:
+
+```bash
+uv run python -m iwildcam.summarise
+```
+
+This writes `results/summary/runs.csv` (one row per run), `by_config.csv` (seeds averaged
+per setting, best first) and `per_class.csv` (F1 per species), and prints the by-config
+table. Runs that crashed are picked up from `logs/` and listed too, so a method that dies
+on some seeds does not quietly disappear.
+
 ---
 
 ## 📋 The task in one page
@@ -120,6 +132,7 @@ iwildcam/            the code you will modify
   models.py          ResNetClassifier, features(), logits()
   train.py           training loop, evaluation, CLI
   train_utils.py     run keys, per-run log file, W&B, resume, config reading
+  summarise.py       flattens your runs into CSVs to analyse
 configs/             fast.yaml (resnet18 @224, iterate) and reference.yaml (resnet50 @448, report)
 tests/               the protocol as assertions — keep it green
 notebooks/           a guided tour of the data and the splits
@@ -127,7 +140,8 @@ data/                metadata.csv.gz, taxonomy.csv, gps_locations.json, the 48 t
                      the image folders land here after prepare.py (gitignored).
                      data/README.md describes every file and every metadata column
 assets/              the figures on this page, and the script that rebuilds them
-results/             runs.jsonl (one line per completed run) and preds/ (raw predictions)
+results/             runs.jsonl (one line per completed run), preds/ (raw predictions)
+                     and summary/ (the CSVs summarise.py writes)
 prepare.py           resizes the downloaded archive into a folder of JPEGs; resumable
 ```
 

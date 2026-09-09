@@ -24,7 +24,7 @@ labelled with a fine-grained taxonomy of 60 species.
 The challenge here is generalising to a new camera. Your models are evaluated
 out-of-distribution: **every image in the test set comes from a camera that never appears
 in training.** The ResNet baseline loses about a third of its performance in this setting
-compared with one where it sees every camera at both training and test time.
+compared with one where it sees every camera at both training and test time (mF1-score: 62.8% → 40.1%).
 
 That setting is the real use case — a field team installs a camera at a new spot and the
 model has to work there on day one. To help, you are allowed to use the empty images (the
@@ -90,6 +90,13 @@ This writes `results/summary/runs.csv` (one row per run), `by_config.csv` (seeds
 per setting, best first) and `per_class.csv` (F1 per species), and prints the by-config
 table. Runs that crashed are picked up from `logs/` and listed too, so a method that dies
 on some seeds does not quietly disappear.
+
+You can start by replicating the baseline runs for the `random_burst` and `official_ood` splits :
+
+| split | model | pretrained | size | epochs | n_seeds | test_macro_f1_present_mean |
+|---|---|---|---|---|---|---|
+| random_burst | resnet50 | True | 448 | 12 | 3 | 0.6277 |
+| official_ood | resnet50 | True | 448 | 12 | 3 | 0.4005 |
 
 ---
 

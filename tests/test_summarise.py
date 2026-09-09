@@ -137,3 +137,39 @@ def test_per_class_is_one_row_per_run_and_species(tmp_path):
 def test_no_runs_yet_is_not_an_error(tmp_path):
     assert summarise.load_runs(tmp_path / "missing.jsonl") == []
     assert summarise.scan_logs(tmp_path / "missing") == []
+
+
+def test_a_new_hyperparameter_gets_its_own_column(tmp_path):
+    """A knob added to the YAML must reach the tables without editing summarise.py."""
+    runs = [dict(r) for r in RUNS[:2]]
+    for r, alpha in zip(runs, [0.2, 0.8]):
+        r["config"] = {**r["config"], "mixup_alpha": alpha,
+                       "model_kwargs": {"dropout": 0.5},
+                       # Recorded in the config, but cannot change the result.
+                       "device": "cuda", "num_workers": 8}
+        r["config_key"] = f"cfg{alpha}"
+        r["run_key"] = f"rk{alpha}"
+    path = tmp_path / "runs.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in runs))
+
+    df = summarise.runs_table(summarise.load_runs(path))
+    assert df["mixup_alpha"].tolist() == [0.2, 0.8]
+    assert df["model_kwargs.dropout"].tolist() == [0.5, 0.5]   # nested, flattened
+    assert "device" not in df.columns                          # cannot change a result
+    assert "num_workers" not in df.columns
+    # The fixed columns keep their order, so the CSV stays predictable.
+    assert list(df.columns)[:len(summarise.RUN_COLUMNS)] == summarise.RUN_COLUMNS
+
+    configs = summarise.by_config(df)
+    assert configs["mixup_alpha"].tolist() == [0.8, 0.2]       # best score first
+
+
+def test_runs_without_a_recorded_config_still_summarise(tmp_path):
+    """Older runs stored no config. They lose the knob columns, not their row."""
+    old = {k: v for k, v in RUNS[0].items() if k != "config"}
+    path = tmp_path / "runs.jsonl"
+    path.write_text(json.dumps(old) + "\n")
+    df = summarise.runs_table(summarise.load_runs(path))
+    assert len(df) == 1
+    assert pd.isna(df["lr"].iloc[0])
+    assert df["test_macro_f1_present"].iloc[0] == 0.30

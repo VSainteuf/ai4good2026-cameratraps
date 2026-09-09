@@ -14,6 +14,10 @@ CSVs under `results/summary/`:
 * `per_class.csv` -- one row per run and species: F1 and how many test images that
   species had. This is where you see *which* animals a method helps.
 
+The first two get one column per hyperparameter, read from the config each run recorded.
+A knob you add to your YAML -- a mixup weight, a new `model_kwargs` entry -- gets its own
+column with no change here, so two rows that scored differently always show what differed.
+
 A run that crashes never reaches `runs.jsonl`, and a method that dies on every third seed
 is worth knowing about. So `logs/` is scanned too, and any per-run log whose run is
 missing from the JSONL adds a row to `runs.csv` with `status = incomplete`, the number of
@@ -35,16 +39,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from .train_utils import JSONL, LOG_DIR, RESULTS
+from .train_utils import IGNORED_IN_KEY, JSONL, LOG_DIR, RESULTS
 
 # One row per run. Fixed order, so the CSV looks the same whatever the runs contain, and
 # so a column that only newer runs record still gets a place (left empty for the others).
 RUN_COLUMNS = ["status", "split", "model", "pretrained", "size", "height", "seed",
                "epochs", "epochs_done", "batch_size", "lr", "weight_decay", "n_params",
+               "min_per_camera", "min_cameras",
                "n_classes", "n_train", "n_val", "n_test",
                "val_macro_f1_present", "test_macro_f1_present", "test_macro_f1",
                "test_accuracy", "test_n_classes_present", "seconds", "error",
                "run_key", "config_key", "pred_file", "log_file"]
+_CORE = set(RUN_COLUMNS)
 
 # What gets averaged over the seeds of one setting.
 METRICS = ["val_macro_f1_present", "test_macro_f1_present", "test_macro_f1",
@@ -54,8 +60,37 @@ METRICS = ["val_macro_f1_present", "test_macro_f1_present", "test_macro_f1",
 # so `by_config.csv` is readable without joining back to `runs.csv`.
 SETTINGS = ["split", "model", "pretrained", "size", "epochs"]
 
-# Config fields worth a column of their own. The rest of the config stays in runs.jsonl.
+# Core columns that live inside the config rather than beside the scores.
 FROM_CONFIG = ["lr", "weight_decay", "height"]
+
+# Config fields that get no column, because they cannot change what a run computes.
+# `IGNORED_IN_KEY` is the same set `run_key` leaves out of its hash, so this list does not
+# have to be maintained twice; `pred_dir` only says where the predictions were written.
+NOT_A_KNOB = IGNORED_IN_KEY | {"pred_dir"}
+
+
+def hyperparameters(config: dict) -> dict:
+    """The knobs in a config that are not already core columns, one per column.
+
+    Everything left after `NOT_A_KNOB` counts as a knob, so a hyperparameter you add to
+    your YAML shows up here without this file being touched. Nested settings are
+    flattened one level, which is what gives `model_kwargs.dropout` a column of its own.
+
+    Args:
+        config: the run's config, as `train.py` recorded it.
+
+    Returns:
+        A flat dict of hyperparameter name to value.
+    """
+    out = {}
+    for key, value in config.items():
+        if key in NOT_A_KNOB or key in _CORE:
+            continue
+        if isinstance(value, dict):
+            out.update({f"{key}.{sub}": v for sub, v in value.items()})
+        else:
+            out[key] = value
+    return out
 
 
 # --- reading what the runs left behind --------------------------------------------------
@@ -161,13 +196,16 @@ def runs_table(rows: list[dict], incomplete: list[dict] | None = None) -> pd.Dat
         incomplete: the unfinished runs found by `scan_logs`.
 
     Returns:
-        A DataFrame with `RUN_COLUMNS`, sorted by setting and then by seed.
+        A DataFrame with `RUN_COLUMNS`, then one column per hyperparameter, sorted by
+        setting and then by seed. Runs too old to have recorded their config leave the
+        hyperparameter columns empty.
     """
     out = []
     for r in rows:
         config = r.get("config", {})
         out.append({**{k: r.get(k) for k in RUN_COLUMNS},
                     **{k: r.get(k, config.get(k)) for k in FROM_CONFIG},
+                    **hyperparameters(config),
                     "status": "complete",
                     "epochs_done": len(r.get("history", [])),
                     "error": ""})
@@ -175,12 +213,17 @@ def runs_table(rows: list[dict], incomplete: list[dict] | None = None) -> pd.Dat
         config = r["config"]
         out.append({**{k: config.get(k) for k in RUN_COLUMNS if k in config},
                     **{k: config.get(k) for k in FROM_CONFIG},
+                    **hyperparameters(config),
                     "status": "incomplete",
                     "epochs_done": r["epochs_done"], "error": r["error"],
                     "run_key": r["run_key"], "config_key": r["config_key"],
                     "log_file": r["log_file"]})
 
-    df = pd.DataFrame(out).reindex(columns=RUN_COLUMNS)
+    df = pd.DataFrame(out)
+    # Core columns in a fixed order so the CSV stays predictable, then whatever knobs
+    # these particular runs carry, alphabetically, on the right.
+    extras = sorted(c for c in df.columns if c not in _CORE)
+    df = df.reindex(columns=RUN_COLUMNS + extras)
     sort_by = ["status"] + SETTINGS + ["seed"]
     return df.sort_values(sort_by, kind="stable").reset_index(drop=True)
 
@@ -195,12 +238,13 @@ def by_config(runs: pd.DataFrame) -> pd.DataFrame:
         runs: the table from `runs_table`. Unfinished runs are left out, having no scores.
 
     Returns:
-        A DataFrame with the settings, `n_seeds`, and the mean and standard deviation of
-        each metric in `METRICS`.
+        A DataFrame with the settings, the hyperparameters, `n_seeds`, and the mean and
+        standard deviation of each metric in `METRICS`.
     """
     df = runs[runs["status"] == "complete"].copy()
     if df.empty:
         return pd.DataFrame(columns=["config_key"] + SETTINGS + ["n_seeds"])
+    extras = [c for c in runs.columns if c not in _CORE]
 
     # Runs recorded before `config_key` existed still have to group with their own seeds.
     # Falling back to the readable settings is what config_key stands for anyway.
@@ -209,7 +253,13 @@ def by_config(runs: pd.DataFrame) -> pd.DataFrame:
 
     agg = {"n_seeds": ("seed", "count")}
     agg.update({f"{m}_{stat}": (m, stat) for m in METRICS for stat in ("mean", "std")})
+    # A hyperparameter is the same for every seed of one config -- config_key hashes it --
+    # so taking the first value states it rather than summarising it.
+    agg.update({c: (c, "first") for c in extras})
     out = df.groupby(["config_key"] + SETTINGS, dropna=False).agg(**agg).reset_index()
+    # The knobs belong next to the settings, not after the scores.
+    out = out[["config_key"] + SETTINGS + extras
+              + [c for c in out.columns if c not in _CORE | set(extras)]]
     return out.sort_values("test_macro_f1_present_mean", ascending=False,
                            kind="stable").reset_index(drop=True)
 
@@ -321,10 +371,14 @@ def main() -> None:
         key = configs["config_key"].astype(str)
         show = configs.assign(
             config=key.str[:8].where(key.str.fullmatch(r"[0-9a-f]{16}"), "(none)"))
-        print(show[["config", "split", "model", "pretrained", "size", "epochs",
-                    "n_seeds", "test_macro_f1_present_mean",
-                    "test_macro_f1_present_std"]].to_string(index=False,
-                                                            float_format="%.4f"))
+        # Only the knobs that differ between these configs earn a column here; the rest
+        # would be the same value repeated down the table. `by_config.csv` has them all.
+        knobs = [c for c in runs.columns if c not in _CORE]
+        varying = [c for c in knobs if configs[c].nunique(dropna=False) > 1]
+        print(show[["config"] + SETTINGS + varying
+                   + ["n_seeds", "test_macro_f1_present_mean",
+                      "test_macro_f1_present_std"]].to_string(index=False,
+                                                              float_format="%.4f"))
     if not runs.empty and (runs["status"] == "incomplete").any():
         print("\nunfinished:")
         bad = runs[runs["status"] == "incomplete"]
